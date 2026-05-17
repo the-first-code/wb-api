@@ -21,6 +21,7 @@
 | Порт | `24097` |
 | База | `defaultdb` |
 | Пользователь | `avnadmin` |
+| Пароль | `AVNS_rCmTCjKKzGND6OZ76fr` |
 
 
 ## Доступы к WB API
