@@ -21,7 +21,6 @@
 | Порт | `24097` |
 | База | `defaultdb` |
 | Пользователь | `avnadmin` |
-| Пароль | `AVNS_rCmTCjKKzGND6OZ76fr` |
 | Root-пароль (Docker) | `root` |
 
 Строка подключения: `mysql://wb_user:wb_secret@127.0.0.1:3307/wb_sync`
