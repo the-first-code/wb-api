@@ -22,7 +22,6 @@
 | База | `defaultdb` |
 | Пользователь | `avnadmin` |
 
-Строка подключения: `mysql://wb_user:wb_secret@127.0.0.1:3307/wb_sync`
 
 ## Доступы к WB API
 
