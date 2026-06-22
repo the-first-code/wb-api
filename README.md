@@ -35,11 +35,27 @@
 
 ## Быстрый старт
 
-### 1. MySQL (Docker)
+### 1. Docker (MySQL + PHP)
 
 ```bash
 cd wb-sync
-docker compose up -d
+docker compose up -d --build
+```
+
+Приложение: http://localhost:8000
+
+Миграции и синхронизация внутри контейнера:
+
+```bash
+docker compose exec php php artisan key:generate
+docker compose exec php php artisan migrate
+docker compose exec php php artisan wb:sync
+```
+
+Только MySQL (без PHP):
+
+```bash
+docker compose up -d mysql
 ```
 
 ### 2. Зависимости и миграции
@@ -68,6 +84,35 @@ php artisan wb:sync --only=stocks
 ```bash
 php artisan wb:sync --from=2024-01-01 --to=2024-12-31
 ```
+
+## Автосинхронизация (2 раза в день)
+
+По расписанию выполняется `wb:sync` за последние N дней (по умолчанию 31). Время задаётся в `.env`:
+
+```env
+APP_TIMEZONE=Europe/Moscow
+WB_SYNC_SCHEDULE_HOUR_1=8    # первый запуск, часы 0–23
+WB_SYNC_SCHEDULE_HOUR_2=20   # второй запуск
+WB_SYNC_SCHEDULE_LOOKBACK_DAYS=31
+```
+
+**Docker** — сервис `scheduler` запускает `php artisan schedule:work` вместе с остальными контейнерами:
+
+```bash
+docker compose up -d --build
+```
+
+Логи: `storage/logs/wb-sync-schedule.log`
+
+**Без Docker** — добавьте в cron одну строку (каждую минуту Laravel сам решает, что запускать):
+
+```cron
+* * * * * cd /path/to/wb-sync && php artisan schedule:run >> /dev/null 2>&1
+```
+
+Или в отдельном процессе: `php artisan schedule:work`.
+
+Проверка расписания: `php artisan schedule:list`
 
 ## Таблицы
 

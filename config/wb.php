@@ -10,4 +10,8 @@ return [
     'request_delay_ms' => (int) env('WB_REQUEST_DELAY_MS', 350),
     'retry_attempts' => (int) env('WB_RETRY_ATTEMPTS', 5),
     'retry_base_seconds' => (int) env('WB_RETRY_BASE_SECONDS', 2),
+
+    'schedule_hour_1' => (int) env('WB_SYNC_SCHEDULE_HOUR_1', 8),
+    'schedule_hour_2' => (int) env('WB_SYNC_SCHEDULE_HOUR_2', 20),
+    'schedule_lookback_days' => (int) env('WB_SYNC_SCHEDULE_LOOKBACK_DAYS', 31),
 ];

@@ -3,8 +3,9 @@ services:
     image: mysql:8.0
     container_name: wb_sync_mysql
     restart: unless-stopped
+    command: --port=3307 --mysqlx=0
     ports:
-      - "3307:3306"
+      - "3307:3307"
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: wb_sync
@@ -13,10 +14,49 @@ services:
     volumes:
       - wb_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-P", "3307", "-u", "root", "-proot"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wb_sync_php
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/var/www/html
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3307
+      DB_DATABASE: wb_sync
+      DB_USERNAME: wb_user
+      DB_PASSWORD: wb_secret
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wb_sync_scheduler
+    restart: unless-stopped
+    volumes:
+      - .:/var/www/html
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3307
+      DB_DATABASE: wb_sync
+      DB_USERNAME: wb_user
+      DB_PASSWORD: wb_secret
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: php artisan schedule:work
 
 volumes:
   wb_mysql_data:
