@@ -130,6 +130,107 @@ WB_SYNC_DATE_FROM=2020-01-01
 WB_SYNC_DATE_TO=          # пусто = сегодня
 ```
 
+При ошибке **Too Many Requests** (HTTP 429 или аналогичное сообщение в ответе) клиент `App\Services\WbApiClient` автоматически ждёт и повторяет запрос.
+
+### Поведение при 429
+
+| Ситуация | Действие |
+|----------|----------|
+| HTTP `429` | Повтор запроса после паузы |
+| Тело ответа содержит `too many requests`, `rate limit` | То же (даже при другом коде, например `503`) |
+| Заголовок `Retry-After` | Пауза ровно на указанное число секунд |
+| Заголовки `X-RateLimit-Retry`, `X-Ratelimit-Retry` | Альтернативный источник времени ожидания |
+| Заголовков нет | Экспоненциальный backoff: `WB_RETRY_BASE_SECONDS × 2^(попытка−1)` |
+| Исчерпаны попытки | `RuntimeException` с текстом ошибки HTTP |
+| Успешный ответ после лимита | Дополнительная пауза `WB_RATE_LIMIT_PENALTY_MS` перед следующим запросом |
+
+Параметры в `.env`:
+
+```env
+WB_RETRY_ATTEMPTS=5
+WB_RETRY_BASE_SECONDS=2
+WB_RETRY_MAX_SECONDS=60
+WB_RATE_LIMIT_PENALTY_MS=1000
+WB_REQUEST_DELAY_MS=350
+```
+
+События rate limit также пишутся в `storage/logs/laravel.log` (уровень `warning`).
+
+### Тесты обработки 429
+
+Файл: `tests/Unit/WbApiClientTest.php`
+
+Тесты используют `Http::fake()` — реальные запросы к WB API **не выполняются**. Паузы `sleep()` подменяются callback-ом, поэтому тесты проходят мгновенно.
+
+#### Запуск
+
+Все тесты проекта:
+
+```bash
+php artisan test
+```
+
+Только тесты клиента WB API (включая 429):
+
+```bash
+php artisan test --filter=WbApiClientTest
+```
+
+В Docker:
+
+```bash
+docker compose exec php php artisan test --filter=WbApiClientTest
+```
+
+#### Список тест-кейсов
+
+| Тест | Что проверяет |
+|------|----------------|
+| `test_retries_on_http_429_and_returns_successful_response` | При первом ответе `429` с заголовком `Retry-After: 3` клиент ждёт 3 секунды, повторяет запрос и возвращает данные из успешного ответа `200`. Отправлено ровно 2 HTTP-запроса. |
+| `test_retries_when_response_body_contains_too_many_requests` | При ответе `503` с JSON `{"message": "Too many requests"}` клиент распознаёт лимит без кода `429`, ждёт 2 секунды (первая попытка backoff: `WB_RETRY_BASE_SECONDS`) и успешно повторяет запрос. |
+| `test_throws_after_max_retry_attempts_on_rate_limit` | Если API стабильно отвечает `429`, после `WB_RETRY_ATTEMPTS` (в тесте — 3) попыток выбрасывается `RuntimeException` с текстом `HTTP 429`. |
+| `test_writes_debug_lines_when_enabled` | При включённом `WbConsoleDebug` в консоль пишутся строки `[debug]` с методом, endpoint и статусом (не относится к 429, но находится в том же файле). |
+
+#### Настройки в `setUp()` тестов
+
+В каждом тесте через `Config::set()` задано:
+
+```php
+wb.retry_attempts = 3
+wb.retry_base_seconds = 2
+wb.retry_max_seconds = 60
+wb.request_delay_ms = 0        // throttle отключён, чтобы не замедлять тесты
+wb.rate_limit_penalty_ms = 0
+```
+
+#### Пример сценария `test_retries_on_http_429_and_returns_successful_response`
+
+1. Запрос `GET /api/orders?...`
+2. Ответ: `429`, тело `{"message":"Too Many Requests"}`, заголовок `Retry-After: 3`
+3. Клиент фиксирует паузу 3 с и повторяет запрос
+4. Ответ: `200`, тело `{"data":[{"id":1}],"meta":{"last_page":1}}`
+5. Утверждения: `data` содержит одну запись, массив пауз `=[3]`, отправлено 2 запроса
+
+#### Пример сценария `test_throws_after_max_retry_attempts_on_rate_limit`
+
+1. API на каждый запрос отвечает `429`
+2. Клиент делает 3 попытки (`wb.retry_attempts = 3`)
+3. На 3-й попытке выбрасывается исключение — синхронизация прерывается с понятной ошибкой
+
+### Отладочный вывод
+
+```bash
+php artisan wb:sync -v
+```
+
+или постоянно через `.env`:
+
+```env
+WB_DEBUG=true
+```
+
+В консоль выводятся HTTP-запросы (ключ скрыт), статусы ответов, пагинация, паузы throttle и повторы при rate limit. При автосинхронизации отладка попадает в `storage/logs/wb-sync-schedule.log`.
+
 ## Требования
 
 - PHP 8.2+, расширения: `pdo_mysql`, `mbstring`, `curl`

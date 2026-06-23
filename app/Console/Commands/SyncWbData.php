@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\WbConsoleDebug;
 use App\Services\WbSyncService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -16,8 +17,12 @@ class SyncWbData extends Command
 
     protected $description = 'Загрузить данные из WB API и сохранить в MySQL';
 
-    public function handle(WbSyncService $sync): int
+    public function handle(WbSyncService $sync, WbConsoleDebug $debug): int
     {
+        if ($this->option('verbose') || config('wb.debug')) {
+            $debug->enable($this->output);
+        }
+
         if (! $this->applyDateOptions()) {
             return self::FAILURE;
         }

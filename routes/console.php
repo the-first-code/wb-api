@@ -1,15 +1,26 @@
 <?php
 
+use App\Services\WbConsoleDebug;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::call(function () {
     $lookback = config('wb.schedule_lookback_days');
 
-    Artisan::call('wb:sync', [
+    if (config('wb.debug')) {
+        app(WbConsoleDebug::class)->enable();
+    }
+
+    $parameters = [
         '--from' => now()->subDays($lookback)->toDateString(),
         '--to' => now()->toDateString(),
-    ]);
+    ];
+
+    if (config('wb.debug')) {
+        $parameters['-v'] = true;
+    }
+
+    Artisan::call('wb:sync', $parameters);
 
     echo Artisan::output();
 })
