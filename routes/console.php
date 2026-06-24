@@ -5,14 +5,12 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::call(function () {
-    $lookback = config('wb.schedule_lookback_days');
-
     if (config('wb.debug')) {
         app(WbConsoleDebug::class)->enable();
     }
 
     $parameters = [
-        '--from' => now()->subDays($lookback)->toDateString(),
+        '--fresh' => true,
         '--to' => now()->toDateString(),
     ];
 

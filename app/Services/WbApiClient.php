@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\TokenType;
 use Closure;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -18,10 +20,36 @@ class WbApiClient
         private ?Closure $sleepSeconds = null,
     ) {}
 
-    public function fetchPaginated(string $endpoint, array $query = []): array
+    public function fetchPaginated(string $endpoint, array $query = [], ?WbApiContext $context = null): array
     {
-        $page = 1;
         $all = [];
+
+        $this->eachPaginatedPage(
+            $endpoint,
+            $query,
+            function (array $items) use (&$all): void {
+                foreach ($items as $item) {
+                    $all[] = $item;
+                }
+            },
+            $context
+        );
+
+        return $all;
+    }
+
+    /**
+     * @param  callable(array<int, array<string, mixed>>, int, int): void  $onPage
+     */
+    public function eachPaginatedPage(
+        string $endpoint,
+        array $query,
+        callable $onPage,
+        ?WbApiContext $context = null,
+    ): int {
+        $context ??= WbApiContext::fromEnv();
+        $page = 1;
+        $totalItems = 0;
 
         do {
             $pageQuery = array_merge($query, [
@@ -29,20 +57,22 @@ class WbApiClient
                 'limit' => config('wb.limit'),
             ]);
 
-            $response = $this->get($endpoint, $pageQuery);
+            $response = $this->get($endpoint, $pageQuery, $context);
 
             $items = $response['data'] ?? [];
-            $all = array_merge($all, $items);
-
             $lastPage = (int) ($response['meta']['last_page'] ?? $page);
+            $totalItems += count($items);
+
+            $onPage($items, $page, $lastPage);
 
             $this->debug->line(sprintf(
-                '%s: страница %d/%d, получено %d записей (всего %d)',
+                '[%s] %s: страница %d/%d, получено %d записей (всего %d)',
+                $context->accountName,
                 $endpoint,
                 $page,
                 $lastPage,
                 count($items),
-                count($all)
+                $totalItems
             ));
 
             $page++;
@@ -52,29 +82,31 @@ class WbApiClient
             }
         } while ($page <= $lastPage);
 
-        return $all;
+        return $totalItems;
     }
 
-    public function get(string $endpoint, array $query = []): array
+    public function get(string $endpoint, array $query = [], ?WbApiContext $context = null): array
     {
-        $query['key'] = config('wb.key');
+        $context ??= WbApiContext::fromEnv();
 
-        $url = rtrim(config('wb.base_url'), '/').'/api/'.ltrim($endpoint, '/');
+        $url = $context->baseUrl.'/api/'.ltrim($endpoint, '/');
         $maxAttempts = (int) config('wb.retry_attempts', 5);
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $requestQuery = $query;
+
             $this->debug->line(sprintf(
-                'GET %s attempt %d/%d %s',
+                '[%s] GET %s attempt %d/%d %s',
+                $context->accountName,
                 $endpoint,
                 $attempt,
                 $maxAttempts,
-                json_encode($this->sanitizeQuery($query), JSON_UNESCAPED_UNICODE)
+                json_encode($this->sanitizeQuery($requestQuery, $context), JSON_UNESCAPED_UNICODE)
             ));
 
             try {
-                $response = Http::timeout(config('wb.timeout'))
-                    ->acceptJson()
-                    ->get($url, $query);
+                $response = $this->buildRequest($context)
+                    ->get($url, $this->applyQueryAuth($requestQuery, $context));
             } catch (ConnectionException $e) {
                 $this->debug->line("connection error: {$e->getMessage()}");
 
@@ -82,7 +114,7 @@ class WbApiClient
                     throw new RuntimeException("WB API connection failed [{$endpoint}]: {$e->getMessage()}", 0, $e);
                 }
 
-                $this->pauseBeforeRetry($endpoint, $attempt, null);
+                $this->pauseBeforeRetry($endpoint, $attempt, null, $context);
 
                 continue;
             }
@@ -91,16 +123,16 @@ class WbApiClient
 
             if ($this->isRateLimited($response)) {
                 if ($attempt >= $maxAttempts) {
-                    $this->throwHttpError($endpoint, $response);
+                    $this->throwHttpError($endpoint, $response, $context);
                 }
 
-                $this->pauseBeforeRetry($endpoint, $attempt, $response);
+                $this->pauseBeforeRetry($endpoint, $attempt, $response, $context);
 
                 continue;
             }
 
             if ($response->failed()) {
-                $this->throwHttpError($endpoint, $response);
+                $this->throwHttpError($endpoint, $response, $context);
             }
 
             $this->throttle();
@@ -108,7 +140,39 @@ class WbApiClient
             return $response->json();
         }
 
-        throw new RuntimeException("WB API error [{$endpoint}]: max retry attempts exceeded");
+        throw new RuntimeException("WB API error [{$endpoint}] account «{$context->accountName}»: max retry attempts exceeded");
+    }
+
+    private function buildRequest(WbApiContext $context): PendingRequest
+    {
+        $request = Http::timeout(config('wb.timeout'))->acceptJson();
+
+        return match ($context->tokenTypeCode) {
+            TokenType::BEARER => $request->withToken((string) ($context->credentials['token'] ?? '')),
+            TokenType::API_KEY => $request->withHeaders([
+                (string) ($context->credentials['header'] ?? 'X-Api-Key') => (string) ($context->credentials['value'] ?? ''),
+            ]),
+            TokenType::QUERY_KEY => $request,
+            TokenType::BASIC_AUTH => $request->withBasicAuth(
+                (string) ($context->credentials['username'] ?? ''),
+                (string) ($context->credentials['password'] ?? ''),
+            ),
+            default => throw new RuntimeException(
+                "Неподдерживаемый тип токена «{$context->tokenTypeCode}» для HTTP-запросов."
+            ),
+        };
+    }
+
+    private function applyQueryAuth(array $query, WbApiContext $context): array
+    {
+        if ($context->tokenTypeCode !== TokenType::QUERY_KEY) {
+            return $query;
+        }
+
+        $param = (string) ($context->credentials['param'] ?? 'key');
+        $query[$param] = (string) ($context->credentials['value'] ?? '');
+
+        return $query;
     }
 
     private function isRateLimited(Response $response): bool
@@ -148,12 +212,13 @@ class WbApiClient
         return false;
     }
 
-    private function pauseBeforeRetry(string $endpoint, int $attempt, ?Response $response): void
+    private function pauseBeforeRetry(string $endpoint, int $attempt, ?Response $response, WbApiContext $context): void
     {
         $seconds = $this->retryDelaySeconds($response, $attempt);
 
         $this->debug->line(sprintf(
-            'rate limit on %s, attempt %d, wait %d s (HTTP %s)',
+            '[%s] rate limit on %s, attempt %d, wait %d s (HTTP %s)',
+            $context->accountName,
             $endpoint,
             $attempt,
             $seconds,
@@ -161,6 +226,7 @@ class WbApiClient
         ));
 
         Log::warning('WB API rate limit, retrying', [
+            'account' => $context->accountName,
             'endpoint' => $endpoint,
             'attempt' => $attempt,
             'status' => $response?->status(),
@@ -210,16 +276,19 @@ class WbApiClient
         sleep(max(1, $seconds));
     }
 
-    private function sanitizeQuery(array $query): array
+    private function sanitizeQuery(array $query, WbApiContext $context): array
     {
-        if (isset($query['key'])) {
-            $query['key'] = '***';
+        if ($context->tokenTypeCode === TokenType::QUERY_KEY) {
+            $param = (string) ($context->credentials['param'] ?? 'key');
+            if (array_key_exists($param, $query)) {
+                $query[$param] = '***';
+            }
         }
 
         return $query;
     }
 
-    private function throwHttpError(string $endpoint, Response $response): void
+    private function throwHttpError(string $endpoint, Response $response, WbApiContext $context): void
     {
         $body = $response->body();
         if (strlen($body) > 500) {
@@ -227,7 +296,7 @@ class WbApiClient
         }
 
         throw new RuntimeException(
-            "WB API error [{$endpoint}] HTTP {$response->status()}: {$body}"
+            "WB API error [{$endpoint}] account «{$context->accountName}» HTTP {$response->status()}: {$body}"
         );
     }
 }

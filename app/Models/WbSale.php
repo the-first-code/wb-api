@@ -3,12 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WbSale extends Model
 {
     protected $table = 'wb_sales';
 
     protected $fillable = [
+        'account_id',
         'g_number', 'date', 'last_change_date', 'supplier_article', 'tech_size',
         'barcode', 'total_price', 'discount_percent', 'is_supply', 'is_realization',
         'promo_code_discount', 'warehouse_name', 'country_name', 'oblast_okrug_name',
@@ -29,4 +31,9 @@ class WbSale extends Model
         'finished_price' => 'decimal:2',
         'price_with_disc' => 'decimal:2',
     ];
+
+    public function account(): BelongsTo
+    {
+        return $this->belongsTo(Account::class);
+    }
 }

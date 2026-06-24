@@ -96,9 +96,29 @@ class WbApiClientTest extends TestCase
         $client->get('orders', ['dateFrom' => '2025-01-01']);
 
         $written = $output->fetch();
-        $this->assertStringContainsString('[debug] GET orders', $written);
-        $this->assertStringContainsString('"key":"***"', $written);
+        $this->assertStringContainsString('[debug] [.env] GET orders', $written);
         $this->assertStringContainsString('HTTP 200 orders', $written);
+    }
+
+    public function test_uses_account_credentials_in_query(): void
+    {
+        Http::fake([
+            'http://wb.test/api/orders*' => Http::response(['data' => [], 'meta' => ['last_page' => 1]], 200),
+        ]);
+
+        $context = new \App\Services\WbApiContext(
+            accountId: 5,
+            accountName: 'Кабинет 1',
+            baseUrl: 'http://wb.test',
+            tokenTypeCode: \App\Models\TokenType::QUERY_KEY,
+            credentials: ['param' => 'key', 'value' => 'account-secret'],
+        );
+
+        $this->makeClient()->get('orders', ['dateFrom' => '2025-01-01'], $context);
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'http://wb.test/api/orders?dateFrom=2025-01-01&key=account-secret';
+        });
     }
 
     private function makeClient(?Closure $sleep = null): WbApiClient

@@ -31,4 +31,24 @@ class Account extends Model
     {
         return $this->hasMany(AccountToken::class);
     }
+
+    public function wbOrders(): HasMany
+    {
+        return $this->hasMany(WbOrder::class);
+    }
+
+    public function wbSales(): HasMany
+    {
+        return $this->hasMany(WbSale::class);
+    }
+
+    public function wbStocks(): HasMany
+    {
+        return $this->hasMany(WbStock::class);
+    }
+
+    public function wbIncomes(): HasMany
+    {
+        return $this->hasMany(WbIncome::class);
+    }
 }
