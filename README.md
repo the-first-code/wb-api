@@ -13,17 +13,6 @@
 
 Документация и примеры: [Postman](https://www.postman.com/cy322666/workspace/app-api-test/overview).
 
-## Доступы к БД (MySQL)
-
-| Параметр | Значение |
-|----------|----------|
-| Хост | `mysql-2a756a8-vitaliyrybalka91-5802.c.aivencloud.com` |
-| Порт | `24097` |
-| База | `defaultdb` |
-| Пользователь | `avnadmin` |
-| Пароль | `AVNS_rCmTCjKKzGND6OZ76fr` |
-
-
 ## Доступы к WB API
 
 | Параметр | Значение |
